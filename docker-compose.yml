@@ -1,0 +1,13 @@
+services:
+  bot:
+    build: .
+    container_name: predicup
+    restart: unless-stopped
+    env_file: .env
+    environment:
+      # внутри контейнера БД и конфиг лежат по этим путям
+      DB_PATH: /app/data/predicup.sqlite3
+      CONFIG_PATH: /app/config/config.yaml
+    volumes:
+      - ./data:/app/data          # SQLite переживает рестарт
+      - ./config:/app/config:ro   # конфиг можно править снаружи
