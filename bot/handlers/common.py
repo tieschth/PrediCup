@@ -1,8 +1,6 @@
 """Базовые команды: /start, /help, /matches."""
 from __future__ import annotations
 
-import asyncio
-import contextlib
 from datetime import datetime, timezone
 
 from aiogram import Bot, F, Router
@@ -13,22 +11,10 @@ from sqlalchemy.ext.asyncio import async_sessionmaker
 
 from bot.config import Settings
 from bot.db import repo
+from bot.handlers.chat_utils import notify_temp, safe_delete
 from bot.services import presentation
 
 router = Router(name="common")
-
-
-async def _delete_later(bot: Bot, chat_id: int, message_id: int, delay: float) -> None:
-    await asyncio.sleep(delay)
-    with contextlib.suppress(Exception):
-        await bot.delete_message(chat_id, message_id)
-
-
-async def _notify_temp(bot: Bot, chat_id: int, text: str, delay: float = 6) -> None:
-    """Короткое самоудаляющееся уведомление в чате, чтобы не захламлять историю."""
-    with contextlib.suppress(Exception):
-        msg = await bot.send_message(chat_id, text)
-        asyncio.create_task(_delete_later(bot, chat_id, msg.message_id, delay))
 
 _START_TEXT = (
     "👋 Привет! Я <b>PrediCup</b> — бот предсказаний на ЧМ-2026.\n\n"
@@ -140,15 +126,14 @@ async def cmd_matches(
         await message.answer(text, disable_web_page_preview=True)
         return
     # В группе: убираем команду и шлём в ЛС, чтобы не засорять чат.
-    with contextlib.suppress(Exception):
-        await message.delete()
+    await safe_delete(message)
     try:
         await bot.send_message(user.id, text, disable_web_page_preview=True)
-        await _notify_temp(
+        await notify_temp(
             bot, message.chat.id, f"📬 {user.full_name}, список — у тебя в личке."
         )
     except TelegramForbiddenError:
-        await _notify_temp(bot, message.chat.id, f"{user.full_name}, {_DM_HINT}", 12)
+        await notify_temp(bot, message.chat.id, f"{user.full_name}, {_DM_HINT}", 12)
 
 
 @router.callback_query(F.data == "mymatches")
