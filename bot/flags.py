@@ -22,6 +22,7 @@ _FIFA_TO_ISO: dict[str, str] = {
     "WAL": "GB", "ALG": "DZ", "CIV": "CI", "NZL": "NZ", "JOR": "JO",
     "UZB": "UZ", "CUW": "CW", "HAI": "HT", "JAM": "JM", "HON": "HN",
     "CPV": "CV", "TRI": "TT", "SLV": "SV", "GUA": "GT",
+    "BIH": "BA", "IRQ": "IQ", "COD": "CD",
 }
 
 _NEUTRAL = "🏳️"
