@@ -64,6 +64,24 @@ async def test_full_flow(settings, sessionmaker, fake_bot, provider):
 
 
 @pytest.mark.asyncio
+async def test_kickoff_is_timezone_aware_after_reload(sessionmaker, provider):
+    """Регрессия: дата из SQLite должна читаться как timezone-aware, иначе
+    сравнение с datetime.now(timezone.utc) падало (как в проде при голосовании)."""
+    from datetime import datetime, timezone
+
+    provider.add_match("A", "B", "AAA", "BBB", minutes_to_kickoff=30)
+    async with sessionmaker() as session:
+        await matches_service.sync_fixtures(session, provider)
+    async with sessionmaker() as session:
+        match = (await repo.list_started_unresolved(
+            session, datetime.now(timezone.utc).replace(year=2100)
+        ))[0]
+        assert match.kickoff_utc.tzinfo is not None
+        # сравнение не должно бросать TypeError
+        assert match.kickoff_utc > datetime.now(timezone.utc)
+
+
+@pytest.mark.asyncio
 async def test_vote_closes_after_kickoff(settings, sessionmaker, fake_bot, provider):
     # матч уже идёт (старт в прошлом) -> голосование должно закрыться
     provider.add_match("A", "B", "AAA", "BBB", minutes_to_kickoff=10)

@@ -14,6 +14,7 @@ from sqlalchemy import (
     ForeignKey,
     Integer,
     String,
+    TypeDecorator,
     UniqueConstraint,
     func,
 )
@@ -22,6 +23,32 @@ from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship
 
 def utcnow() -> datetime:
     return datetime.now(timezone.utc)
+
+
+class UTCDateTime(TypeDecorator):
+    """Хранит datetime в UTC и всегда отдаёт его как timezone-aware.
+
+    SQLite не сохраняет tzinfo, из-за чего «голые» даты при чтении нельзя
+    сравнивать с aware-датами. Этот тип нормализует значения на входе (→ UTC) и
+    проставляет UTC на выходе.
+    """
+
+    impl = DateTime
+    cache_ok = True
+
+    def process_bind_param(self, value: datetime | None, dialect):
+        if value is None:
+            return None
+        if value.tzinfo is None:
+            value = value.replace(tzinfo=timezone.utc)
+        return value.astimezone(timezone.utc)
+
+    def process_result_value(self, value: datetime | None, dialect):
+        if value is None:
+            return None
+        if value.tzinfo is None:
+            return value.replace(tzinfo=timezone.utc)
+        return value.astimezone(timezone.utc)
 
 
 class Base(DeclarativeBase):
@@ -53,9 +80,7 @@ class User(Base):
     tg_id: Mapped[int] = mapped_column(BigInteger, primary_key=True)
     username: Mapped[str | None] = mapped_column(String(64), nullable=True)
     display_name: Mapped[str | None] = mapped_column(String(128), nullable=True)
-    first_seen: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True), default=utcnow
-    )
+    first_seen: Mapped[datetime] = mapped_column(UTCDateTime, default=utcnow)
 
 
 class Match(Base):
@@ -68,7 +93,7 @@ class Match(Base):
     away_team: Mapped[str] = mapped_column(String(64))
     home_code: Mapped[str] = mapped_column(String(8))
     away_code: Mapped[str] = mapped_column(String(8))
-    kickoff_utc: Mapped[datetime] = mapped_column(DateTime(timezone=True), index=True)
+    kickoff_utc: Mapped[datetime] = mapped_column(UTCDateTime, index=True)
     status: Mapped[MatchStatus] = mapped_column(
         String(16), default=MatchStatus.SCHEDULED
     )
@@ -96,11 +121,9 @@ class Prediction(Base):
     user_tg_id: Mapped[int] = mapped_column(ForeignKey("users.tg_id"), index=True)
     choice: Mapped[Choice] = mapped_column(String(8))
     points_awarded: Mapped[int] = mapped_column(Integer, default=0)
-    created_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True), default=utcnow
-    )
+    created_at: Mapped[datetime] = mapped_column(UTCDateTime, default=utcnow)
     updated_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True), default=utcnow, onupdate=utcnow
+        UTCDateTime, default=utcnow, onupdate=utcnow
     )
 
     match: Mapped["Match"] = relationship(back_populates="predictions")
