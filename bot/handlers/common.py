@@ -1,6 +1,8 @@
 """Базовые команды: /start, /help, /matches."""
 from __future__ import annotations
 
+import asyncio
+import contextlib
 from datetime import datetime, timezone
 
 from aiogram import Bot, Router
@@ -14,6 +16,19 @@ from bot.db import repo
 from bot.services import presentation
 
 router = Router(name="common")
+
+
+async def _delete_later(bot: Bot, chat_id: int, message_id: int, delay: float) -> None:
+    await asyncio.sleep(delay)
+    with contextlib.suppress(Exception):
+        await bot.delete_message(chat_id, message_id)
+
+
+async def _notify_temp(bot: Bot, chat_id: int, text: str, delay: float = 6) -> None:
+    """Короткое самоудаляющееся уведомление в чате, чтобы не захламлять историю."""
+    with contextlib.suppress(Exception):
+        msg = await bot.send_message(chat_id, text)
+        asyncio.create_task(_delete_later(bot, chat_id, msg.message_id, delay))
 
 _START_TEXT = (
     "👋 Привет! Я <b>PrediCup</b> — бот предсказаний на ЧМ-2026.\n\n"
@@ -106,13 +121,24 @@ async def cmd_matches(
                 lines.append(f"• {head}\n  🕒 {when} — {status}")
             text = "\n".join(lines)
 
-    # Отправляем в ЛС; если бот не может писать пользователю — подсказываем нажать Start
+    # В личке просто отвечаем списком — чистить нечего.
+    if message.chat.type == "private":
+        await message.answer(text, disable_web_page_preview=True)
+        return
+
+    # В группе: убираем команду пользователя и шлём список в ЛС, чтобы не засорять чат.
+    with contextlib.suppress(Exception):
+        await message.delete()
     try:
         await bot.send_message(user.id, text, disable_web_page_preview=True)
-        if message.chat.type != "private":
-            await message.reply("📬 Прислал список тебе в личку.")
+        await _notify_temp(
+            bot, message.chat.id, f"📬 {user.full_name}, список — у тебя в личке."
+        )
     except TelegramForbiddenError:
-        await message.reply(
-            "Чтобы получить список в личку, сначала напиши мне в ЛС команду /start "
-            "(бот не может написать первым)."
+        await _notify_temp(
+            bot,
+            message.chat.id,
+            f"{user.full_name}, чтобы получить список в личке, сначала напиши мне "
+            "в ЛС команду /start (бот не может написать первым).",
+            delay=12,
         )
