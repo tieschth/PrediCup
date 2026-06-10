@@ -53,12 +53,17 @@ async def main() -> None:
             "ENV=dev: дев-команды включены (/devmatch, /devopen, /devresult, /devreset)"
         )
 
-    # Стартовая синхронизация расписания, чтобы данные были сразу (не ждать
-    # первого тика планировщика — у sync интервал в часах).
+    # Стартовая синхронизация + «догоняющее» открытие/закрытие: данные доступны
+    # сразу, а при рестарте в течение дня уже открытые голосования
+    # восстанавливаются (повторно не постятся — есть защита), не дожидаясь крона.
     try:
         async with sessionmaker() as session:
             n = await matches_service.sync_fixtures(session, provider)
         logger.info("Стартовая синхронизация: %s матчей", n)
+        async with sessionmaker() as session:
+            opened = await matches_service.open_votes(bot, session, settings)
+            closed = await matches_service.close_votes(bot, session, settings)
+        logger.info("Догоняющее открытие=%s, закрытие=%s", opened, closed)
     except Exception:  # noqa: BLE001
         logger.exception("Стартовая синхронизация не удалась")
 

@@ -52,7 +52,7 @@ async def sync_fixtures(session: AsyncSession, provider: MatchProvider) -> int:
 
 # --------------------------- открытие голосования ----------------------------
 async def open_votes(bot: Bot, session: AsyncSession, settings: Settings) -> int:
-    window = settings.app.bot.vote_open_hours_before * 3600
+    window = settings.app.scheduler.open_window_hours * 3600
     matches = await repo.list_matches_for_vote_opening(session, _now(), window)
     opened = 0
     for match in matches:
@@ -66,7 +66,7 @@ async def open_next(
     bot: Bot, session: AsyncSession, settings: Settings, count: int = 1
 ) -> int:
     """Открыть голосование по ближайшим `count` предстоящим матчам без активной
-    голосовалки, ИГНОРИРУЯ окно vote_open_hours_before. Для дев-команды /devopen."""
+    голосовалки, ИГНОРИРУЯ окно open_window_hours. Для дев-команды /devopen."""
     huge_window = 10**9  # секунд — фактически без ограничения окна
     matches = await repo.list_matches_for_vote_opening(session, _now(), huge_window)
     opened = 0

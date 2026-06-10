@@ -17,8 +17,7 @@ def _display(user: User) -> str:
 
 
 async def render_leaderboard(session: AsyncSession) -> str:
-    rows = await repo.leaderboard(session)
-    rows = [(u, p) for u, p in rows if p > 0] or rows  # покажем всех, если очков нет
+    rows = await repo.leaderboard(session)  # все, кто голосовал хотя бы раз
     if not rows:
         return "🏆 <b>Таблица лидеров</b>\n\nПока нет ни одного прогноза."
     lines = ["🏆 <b>Таблица лидеров</b>", ""]

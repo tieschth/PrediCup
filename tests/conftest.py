@@ -46,8 +46,9 @@ def settings() -> Settings:
     )
     app = AppConfig.model_validate(
         {
-            "bot": {"vote_open_hours_before": 10, "display_timezone": "UTC"},
+            "bot": {"display_timezone": "UTC"},
             "provider": {"name": "mock"},
+            "scheduler": {"open_window_hours": 24},
             "roles": {"admins": [ADMIN_ID], "allowed_chats": [CHAT_ID]},
             "scoring": {"correct_outcome": 3},
         }

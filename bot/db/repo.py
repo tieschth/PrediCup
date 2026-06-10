@@ -273,12 +273,14 @@ async def clear_matches_and_predictions(session: AsyncSession) -> None:
 
 
 async def leaderboard(session: AsyncSession) -> list[tuple[User, int]]:
-    """Список (User, сумма очков) по убыванию очков."""
+    """Список (User, сумма очков) по убыванию очков. Только участники, сделавшие
+    хотя бы один прогноз (inner join), — даже если очков пока 0."""
+    pts = func.coalesce(func.sum(Prediction.points_awarded), 0)
     res = await session.execute(
-        select(User, func.coalesce(func.sum(Prediction.points_awarded), 0).label("pts"))
-        .outerjoin(Prediction, Prediction.user_tg_id == User.tg_id)
+        select(User, pts.label("pts"))
+        .join(Prediction, Prediction.user_tg_id == User.tg_id)
         .group_by(User.tg_id)
-        .order_by(func.coalesce(func.sum(Prediction.points_awarded), 0).desc())
+        .order_by(pts.desc(), func.count(Prediction.id).desc(), User.tg_id)
     )
     return [(row[0], int(row[1])) for row in res.all()]
 

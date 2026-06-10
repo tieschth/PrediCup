@@ -43,7 +43,8 @@ copy config\config.example.yaml config\config.yaml   # впиши admins и allo
 - **`.env`** — только секреты и пути: `BOT_TOKEN`, `FOOTBALL_API_KEY`,
   `ENV` (`dev`/`prod`), `CONFIG_PATH`, `DB_PATH`.
 - **`config/config.yaml`** — настройки (см. `config/config.example.yaml`):
-  - `bot.vote_open_hours_before` — за сколько часов до матча открывать голосование;
+  - `scheduler.open_at_local` — время (по `display_timezone`) ежедневного открытия
+    голосований; `scheduler.open_window_hours` — на матчи ближайших N часов;
   - `provider.name` — `mock` | `football_data_org` | `openfootball`;
   - `roles.admins` — `tg_id` админов; `roles.allowed_chats` — id чатов (супергруппа,
     отрицательный id вида `-100…`);

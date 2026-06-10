@@ -34,16 +34,22 @@ def setup_scheduler(
         except Exception:  # noqa: BLE001
             logger.exception("Ошибка sync_fixtures")
 
-    async def job_open_close() -> None:
+    async def job_open() -> None:
         try:
             async with sessionmaker() as session:
                 opened = await matches_service.open_votes(bot, session, settings)
+            logger.info("Открытие голосований (10:05): открыто=%s", opened)
+        except Exception:  # noqa: BLE001
+            logger.exception("Ошибка открытия голосований")
+
+    async def job_close() -> None:
+        try:
             async with sessionmaker() as session:
                 closed = await matches_service.close_votes(bot, session, settings)
-            if opened or closed:
-                logger.info("открыто=%s закрыто=%s", opened, closed)
+            if closed:
+                logger.info("Закрыто голосований: %s", closed)
         except Exception:  # noqa: BLE001
-            logger.exception("Ошибка open/close votes")
+            logger.exception("Ошибка закрытия голосований")
 
     async def job_resolve() -> None:
         try:
@@ -56,15 +62,22 @@ def setup_scheduler(
         except Exception:  # noqa: BLE001
             logger.exception("Ошибка resolve_results")
 
-    # Открытие/закрытие и резолв запускаем почти сразу после старта (а не через
-    # полный интервал), чтобы голосования появлялись без задержки.
+    # Закрытие и резолв стартуют почти сразу после старта (а не через полный
+    # интервал). Открытие — по расписанию (крон), плюс «догоняющее» открытие на
+    # старте бота делает main.py (на случай рестарта в течение дня).
     soon = datetime.now(timezone.utc) + timedelta(seconds=10)
+    hour, minute = _parse_hhmm(sc.open_at_local)
+    tz = settings.app.bot.display_timezone
+
     sched.add_job(job_sync, "interval", hours=sc.sync_fixtures_hours, id="sync")
     sched.add_job(
-        job_open_close,
+        job_open, "cron", hour=hour, minute=minute, timezone=tz, id="open_daily"
+    )
+    sched.add_job(
+        job_close,
         "interval",
-        minutes=sc.open_votes_minutes,
-        id="open_close",
+        minutes=sc.close_votes_minutes,
+        id="close",
         next_run_time=soon,
     )
     sched.add_job(
@@ -75,3 +88,9 @@ def setup_scheduler(
         next_run_time=soon,
     )
     return sched
+
+
+def _parse_hhmm(value: str) -> tuple[int, int]:
+    """'10:05' -> (10, 5)."""
+    h, m = value.split(":")
+    return int(h), int(m)

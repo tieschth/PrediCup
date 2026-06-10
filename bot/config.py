@@ -14,7 +14,6 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
 class BotCfg(BaseModel):
-    vote_open_hours_before: float = 10
     display_timezone: str = "Europe/Moscow"
 
 
@@ -24,9 +23,13 @@ class ProviderCfg(BaseModel):
 
 
 class SchedulerCfg(BaseModel):
+    # Ежедневно в это время (по display_timezone) открываются голосования по всем
+    # матчам, стартующим в ближайшие open_window_hours часов.
+    open_at_local: str = "10:05"
+    open_window_hours: float = 24
     sync_fixtures_hours: float = 6
-    open_votes_minutes: float = 15
-    resolve_results_minutes: float = 5
+    close_votes_minutes: float = 5      # как часто проверять закрытие на старте
+    resolve_results_minutes: float = 5  # как часто проверять результаты
 
 
 class RolesCfg(BaseModel):

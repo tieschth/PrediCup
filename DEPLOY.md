@@ -52,12 +52,15 @@ cp config/config.example.yaml config/config.yaml
 В `config/config.yaml` укажи как минимум:
 ```yaml
 bot:
-  vote_open_hours_before: 10        # за сколько часов до матча открывать голосование
   display_timezone: "Europe/Moscow" # часовой пояс отображения времени матчей
 
 provider:
   name: football_data_org
   competition: "WC"
+
+scheduler:
+  open_at_local: "10:05"            # время МСК ежедневного открытия голосований
+  open_window_hours: 24             # на матчи ближайших 24 часов
 
 roles:
   admins: [123456789]               # tg_id админов

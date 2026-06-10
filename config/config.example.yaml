@@ -2,8 +2,6 @@
 # Секреты (токены/ключи) сюда НЕ кладём — они в .env.
 
 bot:
-  # За сколько часов до старта матча открывать голосовалку
-  vote_open_hours_before: 10
   # Часовой пояс для отображения времени матчей участникам
   display_timezone: "Europe/Moscow"
 
@@ -14,9 +12,13 @@ provider:
   competition: "WC"
 
 scheduler:
-  sync_fixtures_hours: 6        # как часто обновлять расписание
-  open_votes_minutes: 15        # как часто проверять, не пора ли открыть голосование
-  resolve_results_minutes: 5    # как часто проверять результаты завершённых матчей
+  # Ежедневно в это время (по display_timezone) открываются голосования по всем
+  # матчам, стартующим в ближайшие open_window_hours часов.
+  open_at_local: "10:05"
+  open_window_hours: 24
+  sync_fixtures_hours: 6         # как часто обновлять расписание
+  close_votes_minutes: 5         # как часто проверять закрытие голосования на старте
+  resolve_results_minutes: 5     # как часто проверять результаты завершённых матчей
 
 roles:
   # tg_id пользователей с доступом к /leaderboard и админ-командам
@@ -26,4 +28,4 @@ roles:
 
 scoring:
   # Очки за угаданный исход (П1/Х/П2) на групповом этапе
-  correct_outcome: 3
+  correct_outcome: 1
