@@ -5,6 +5,7 @@ X-Auth-Token. Документация: https://www.football-data.org/documentat
 """
 from __future__ import annotations
 
+import time
 from datetime import datetime, timezone
 
 import aiohttp
@@ -14,6 +15,11 @@ from bot.services.football.base import FixtureDTO, MatchProvider, ResultDTO
 from bot.teams import canonical
 
 BASE_URL = "https://api.football-data.org/v4"
+
+# Один запрос к /competitions/WC/matches отдаёт все 104 матча со статусами и
+# счётом. Кэшируем его на короткое время, чтобы пачка проверок результатов в
+# одном цикле резолва стоила 1 запрос, а не N (лимит — 10 запросов/мин).
+_CACHE_TTL = 90.0
 
 # Маппинг статусов football-data.org -> наши
 _STATUS_MAP = {
@@ -32,6 +38,8 @@ class FootballDataOrgProvider(MatchProvider):
         self._key = api_key
         self._competition = competition
         self._session: aiohttp.ClientSession | None = None
+        self._cache: dict[str, dict] = {}  # id -> сырой матч
+        self._cache_ts: float = 0.0
 
     async def _get_session(self) -> aiohttp.ClientSession:
         if self._session is None or self._session.closed:
@@ -46,7 +54,15 @@ class FootballDataOrgProvider(MatchProvider):
         async with session.get(url) as resp:
             resp.raise_for_status()
             data = await resp.json()
-        return data.get("matches", [])
+        matches = data.get("matches", [])
+        self._cache = {str(m["id"]): m for m in matches}
+        self._cache_ts = time.monotonic()
+        return matches
+
+    async def _cached_matches(self) -> dict[str, dict]:
+        if not self._cache or (time.monotonic() - self._cache_ts) > _CACHE_TTL:
+            await self._fetch_matches()
+        return self._cache
 
     @staticmethod
     def _parse(m: dict) -> FixtureDTO:
@@ -79,13 +95,11 @@ class FootballDataOrgProvider(MatchProvider):
         return [self._parse(m) for m in matches]
 
     async def result(self, provider_match_id: str) -> ResultDTO | None:
-        session = await self._get_session()
-        url = f"{BASE_URL}/matches/{provider_match_id}"
-        async with session.get(url) as resp:
-            if resp.status == 404:
-                return None
-            resp.raise_for_status()
-            m = await resp.json()
+        # Берём из кэша всего турнира — не делаем отдельный запрос на каждый матч.
+        matches = await self._cached_matches()
+        m = matches.get(str(provider_match_id))
+        if m is None:
+            return None
         score = m.get("score", {}).get("fullTime", {})
         status = _STATUS_MAP.get(m.get("status", ""), MatchStatus.SCHEDULED)
         return ResultDTO(
