@@ -62,6 +62,21 @@ async def open_votes(bot: Bot, session: AsyncSession, settings: Settings) -> int
     return opened
 
 
+async def open_next(
+    bot: Bot, session: AsyncSession, settings: Settings, count: int = 1
+) -> int:
+    """Открыть голосование по ближайшим `count` предстоящим матчам без активной
+    голосовалки, ИГНОРИРУЯ окно vote_open_hours_before. Для дев-команды /devopen."""
+    huge_window = 10**9  # секунд — фактически без ограничения окна
+    matches = await repo.list_matches_for_vote_opening(session, _now(), huge_window)
+    opened = 0
+    for match in matches[:count]:
+        if await _post_vote(bot, session, settings, match):
+            opened += 1
+    await session.commit()
+    return opened
+
+
 async def _post_vote(
     bot: Bot, session: AsyncSession, settings: Settings, match: Match
 ) -> bool:

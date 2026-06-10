@@ -1,11 +1,12 @@
 """Дев-команды для ручного прогона сценария (только ENV=dev + админ).
 
-Работают с MockProvider:
-  /devmatch <home> <away> <минут_до_старта> [home_code] [away_code]
-      — вбрасывает фейковый матч и сразу открывает по нему голосование.
-  /devresult <HOME|DRAW|AWAY> [счёт_вида_2:1]
-      — «как будто API прочитал результат»: резолвит последний матч, начисляет
-        очки и публикует итог.
+  /devmatch <home> <away> <минут> [home_code] [away_code]  — только provider=mock:
+      вбрасывает фейковый матч и сразу открывает голосование.
+  /devopen [count]            — открыть голосование по ближайшим матчам вручную
+      (работает и с реальным провайдером: удобно для контрольного теста).
+  /devresult <HOME|DRAW|AWAY> [счёт_вида_2:1]  — финализировать последний
+      незавершённый матч: начислить очки и опубликовать итог (любой провайдер).
+  /devreset                   — очистить тестовые матчи/прогнозы/голосовалки.
 """
 from __future__ import annotations
 
@@ -27,14 +28,23 @@ router = Router(name="dev")
 _DEFAULT_SCORES = {Choice.HOME: (1, 0), Choice.DRAW: (1, 1), Choice.AWAY: (0, 1)}
 
 
-def _guard(message: Message, settings: Settings, provider: MatchProvider) -> str | None:
+def _dev_guard(message: Message, settings: Settings) -> str | None:
+    """Доступ к дев-командам: только ENV=dev и админ (без привязки к провайдеру)."""
     if not settings.secrets.is_dev:
         return "Дев-команды доступны только при ENV=dev."
     user = message.from_user
     if user is None or not is_admin(settings, user.id):
         return "⛔ Только для администраторов."
+    return None
+
+
+def _mock_guard(message: Message, settings: Settings, provider: MatchProvider) -> str | None:
+    """Дополнительно требует mock-провайдер (для /devmatch)."""
+    err = _dev_guard(message, settings)
+    if err:
+        return err
     if not isinstance(provider, MockProvider):
-        return "Дев-команды работают только с provider.name=mock."
+        return "Эта команда работает только с provider.name=mock."
     return None
 
 
@@ -42,11 +52,10 @@ def _guard(message: Message, settings: Settings, provider: MatchProvider) -> str
 async def cmd_devreset(
     message: Message,
     settings: Settings,
-    provider: MatchProvider,
     sessionmaker: async_sessionmaker,
     **_: object,
 ) -> None:
-    err = _guard(message, settings, provider)
+    err = _dev_guard(message, settings)
     if err:
         await message.reply(err)
         return
@@ -65,7 +74,7 @@ async def cmd_devmatch(
     sessionmaker: async_sessionmaker,
     **_: object,
 ) -> None:
-    err = _guard(message, settings, provider)
+    err = _mock_guard(message, settings, provider)
     if err:
         await message.reply(err)
         return
@@ -94,6 +103,31 @@ async def cmd_devmatch(
     await message.reply(f"✅ Матч добавлен, открыто голосований: {opened}.")
 
 
+@router.message(Command("devopen"))
+async def cmd_devopen(
+    message: Message,
+    bot: Bot,
+    settings: Settings,
+    sessionmaker: async_sessionmaker,
+    **_: object,
+) -> None:
+    err = _dev_guard(message, settings)
+    if err:
+        await message.reply(err)
+        return
+    parts = (message.text or "").split()[1:]
+    count = 1
+    if parts:
+        try:
+            count = max(1, int(parts[0]))
+        except ValueError:
+            await message.reply("Использование: /devopen [count]")
+            return
+    async with sessionmaker() as session:
+        opened = await matches_service.open_next(bot, session, settings, count)
+    await message.reply(f"✅ Открыто голосований: {opened}.")
+
+
 @router.message(Command("devresult"))
 async def cmd_devresult(
     message: Message,
@@ -103,13 +137,20 @@ async def cmd_devresult(
     sessionmaker: async_sessionmaker,
     **_: object,
 ) -> None:
-    err = _guard(message, settings, provider)
+    err = _dev_guard(message, settings)
     if err:
         await message.reply(err)
         return
     parts = (message.text or "").split()[1:]
+    # необязательный первый аргумент — id матча; иначе берём последний с голосовалкой
+    match_id: int | None = None
+    if parts and parts[0].isdigit():
+        match_id = int(parts[0])
+        parts = parts[1:]
     if not parts:
-        await message.reply("Использование: /devresult <HOME|DRAW|AWAY> [2:1]")
+        await message.reply(
+            "Использование: /devresult [match_id] <HOME|DRAW|AWAY> [2:1]"
+        )
         return
     try:
         outcome = Choice(parts[0].upper())
@@ -127,13 +168,17 @@ async def cmd_devresult(
         home_score, away_score = _DEFAULT_SCORES[outcome]
 
     async with sessionmaker() as session:
-        match = await repo.get_latest_unresolved_match(session)
+        if match_id is not None:
+            match = await repo.get_match(session, match_id)
+        else:
+            match = await repo.get_latest_voted_unresolved_match(session)
         if match is None:
-            await message.reply("Нет незавершённого матча для резолва.")
+            await message.reply("Нет матча для резолва (укажи match_id из /matches).")
             return
-        assert isinstance(provider, MockProvider)
-        provider.set_result(match.provider_match_id, home_score, away_score)
+        # для mock также положим результат в провайдер (на случай авто-резолва)
+        if isinstance(provider, MockProvider):
+            provider.set_result(match.provider_match_id, home_score, away_score)
         await matches_service.force_resolve(
             bot, session, settings, match, home_score, away_score, outcome
         )
-    await message.reply("🏁 Матч зарезолвлен, очки начислены.")
+    await message.reply(f"🏁 Матч #{match.id} зарезолвлен, очки начислены.")

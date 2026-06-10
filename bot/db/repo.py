@@ -142,6 +142,21 @@ async def get_latest_unresolved_match(session: AsyncSession) -> Match | None:
     return res.scalars().first()
 
 
+async def get_latest_voted_unresolved_match(session: AsyncSession) -> Match | None:
+    """Незавершённый матч с самой свежей голосовалкой — то, что сейчас тестируют.
+    Если таких нет, откатываемся к последнему незавершённому матчу."""
+    res = await session.execute(
+        select(Match)
+        .join(VoteMessage, VoteMessage.match_id == Match.id)
+        .where(Match.resolved.is_(False))
+        .order_by(VoteMessage.id.desc())
+    )
+    match = res.scalars().first()
+    if match is not None:
+        return match
+    return await get_latest_unresolved_match(session)
+
+
 async def list_started_unresolved(session: AsyncSession, now: datetime) -> list[Match]:
     """Матчи, которые уже должны были начаться, но ещё не зарезолвлены —
     кандидаты на проверку результата у провайдера."""

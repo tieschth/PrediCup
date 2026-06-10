@@ -49,7 +49,9 @@ async def main() -> None:
     dp.include_router(predictions.router)
     if settings.secrets.is_dev:
         dp.include_router(dev.router)
-        logger.info("ENV=dev: дев-команды /devmatch, /devresult включены")
+        logger.info(
+            "ENV=dev: дев-команды включены (/devmatch, /devopen, /devresult, /devreset)"
+        )
 
     # Стартовая синхронизация расписания, чтобы данные были сразу (не ждать
     # первого тика планировщика — у sync интервал в часах).
