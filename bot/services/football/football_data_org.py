@@ -11,6 +11,7 @@ import aiohttp
 
 from bot.db.models import MatchStatus
 from bot.services.football.base import FixtureDTO, MatchProvider, ResultDTO
+from bot.teams import canonical
 
 BASE_URL = "https://api.football-data.org/v4"
 
@@ -56,12 +57,16 @@ class FootballDataOrgProvider(MatchProvider):
             m["utcDate"].replace("Z", "+00:00")
         ).astimezone(timezone.utc)
         status = _STATUS_MAP.get(m.get("status", ""), MatchStatus.SCHEDULED)
+        home_name = home.get("name") or home.get("shortName") or "TBD"
+        away_name = away.get("name") or away.get("shortName") or "TBD"
+        home_team, home_code = canonical(home_name, (home.get("tla") or ""))
+        away_team, away_code = canonical(away_name, (away.get("tla") or ""))
         return FixtureDTO(
             provider_match_id=str(m["id"]),
-            home_team=home.get("name") or home.get("shortName") or "TBD",
-            away_team=away.get("name") or away.get("shortName") or "TBD",
-            home_code=(home.get("tla") or "")[:8],
-            away_code=(away.get("tla") or "")[:8],
+            home_team=home_team,
+            away_team=away_team,
+            home_code=home_code[:8],
+            away_code=away_code[:8],
             kickoff_utc=kickoff,
             stage=(m.get("stage") or "group").lower(),
             status=status,

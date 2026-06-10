@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import logging
+from datetime import datetime, timedelta, timezone
 
 from aiogram import Bot
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
@@ -55,11 +56,22 @@ def setup_scheduler(
         except Exception:  # noqa: BLE001
             logger.exception("Ошибка resolve_results")
 
+    # Открытие/закрытие и резолв запускаем почти сразу после старта (а не через
+    # полный интервал), чтобы голосования появлялись без задержки.
+    soon = datetime.now(timezone.utc) + timedelta(seconds=10)
     sched.add_job(job_sync, "interval", hours=sc.sync_fixtures_hours, id="sync")
     sched.add_job(
-        job_open_close, "interval", minutes=sc.open_votes_minutes, id="open_close"
+        job_open_close,
+        "interval",
+        minutes=sc.open_votes_minutes,
+        id="open_close",
+        next_run_time=soon,
     )
     sched.add_job(
-        job_resolve, "interval", minutes=sc.resolve_results_minutes, id="resolve"
+        job_resolve,
+        "interval",
+        minutes=sc.resolve_results_minutes,
+        id="resolve",
+        next_run_time=soon,
     )
     return sched

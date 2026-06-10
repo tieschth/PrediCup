@@ -12,6 +12,7 @@ from bot.config import load_settings
 from bot.db.session import get_sessionmaker, init_db, init_engine
 from bot.handlers import admin, common, dev, predictions
 from bot.scheduler import setup_scheduler
+from bot.services import matches as matches_service
 from bot.services.football.factory import build_provider
 
 logging.basicConfig(
@@ -49,6 +50,15 @@ async def main() -> None:
     if settings.secrets.is_dev:
         dp.include_router(dev.router)
         logger.info("ENV=dev: дев-команды /devmatch, /devresult включены")
+
+    # Стартовая синхронизация расписания, чтобы данные были сразу (не ждать
+    # первого тика планировщика — у sync интервал в часах).
+    try:
+        async with sessionmaker() as session:
+            n = await matches_service.sync_fixtures(session, provider)
+        logger.info("Стартовая синхронизация: %s матчей", n)
+    except Exception:  # noqa: BLE001
+        logger.exception("Стартовая синхронизация не удалась")
 
     scheduler = setup_scheduler(bot, sessionmaker, settings, provider)
     scheduler.start()
