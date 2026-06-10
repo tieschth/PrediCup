@@ -38,6 +38,24 @@ def _guard(message: Message, settings: Settings, provider: MatchProvider) -> str
     return None
 
 
+@router.message(Command("devreset"))
+async def cmd_devreset(
+    message: Message,
+    settings: Settings,
+    provider: MatchProvider,
+    sessionmaker: async_sessionmaker,
+    **_: object,
+) -> None:
+    err = _guard(message, settings, provider)
+    if err:
+        await message.reply(err)
+        return
+    async with sessionmaker() as session:
+        await repo.clear_matches_and_predictions(session)
+        await session.commit()
+    await message.reply("🧹 Тестовые данные очищены: матчи, прогнозы, голосовалки.")
+
+
 @router.message(Command("devmatch"))
 async def cmd_devmatch(
     message: Message,

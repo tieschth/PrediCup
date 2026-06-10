@@ -6,6 +6,7 @@
 """
 from __future__ import annotations
 
+import uuid
 from datetime import datetime, timedelta, timezone
 
 from bot.db.models import MatchStatus
@@ -16,7 +17,6 @@ class MockProvider(MatchProvider):
     def __init__(self) -> None:
         self._fixtures: dict[str, FixtureDTO] = {}
         self._results: dict[str, ResultDTO] = {}
-        self._counter = 0
 
     def add_match(
         self,
@@ -27,8 +27,9 @@ class MockProvider(MatchProvider):
         minutes_to_kickoff: float = 60,
         stage: str = "group",
     ) -> FixtureDTO:
-        self._counter += 1
-        pid = f"mock-{self._counter}"
+        # Уникальный id, не зависящий от перезапусков (счётчик сбрасывался и
+        # коллизировал с уже завершёнными матчами в постоянной SQLite-базе).
+        pid = f"mock-{uuid.uuid4().hex[:12]}"
         kickoff = datetime.now(timezone.utc) + timedelta(minutes=minutes_to_kickoff)
         dto = FixtureDTO(
             provider_match_id=pid,

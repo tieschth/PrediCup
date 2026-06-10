@@ -247,6 +247,16 @@ async def close_vote_messages_for_match(session: AsyncSession, match_id: int) ->
 
 
 # ----------------------------- Leaderboard -----------------------------------
+async def clear_matches_and_predictions(session: AsyncSession) -> None:
+    """Удалить все матчи, прогнозы и сообщения-голосовалки (для дев-сброса).
+    Пользователи остаются."""
+    from sqlalchemy import delete
+
+    await session.execute(delete(VoteMessage))
+    await session.execute(delete(Prediction))
+    await session.execute(delete(Match))
+
+
 async def leaderboard(session: AsyncSession) -> list[tuple[User, int]]:
     """Список (User, сумма очков) по убыванию очков."""
     res = await session.execute(

@@ -5,10 +5,10 @@ import asyncio
 import contextlib
 from datetime import datetime, timezone
 
-from aiogram import Bot, Router
+from aiogram import Bot, F, Router
 from aiogram.exceptions import TelegramForbiddenError
 from aiogram.filters import Command
-from aiogram.types import Message
+from aiogram.types import CallbackQuery, Message
 from sqlalchemy.ext.asyncio import async_sessionmaker
 
 from bot.config import Settings
@@ -86,6 +86,41 @@ async def cmd_id(message: Message, **_: object) -> None:
     await message.reply("\n".join(lines))
 
 
+async def _build_open_matches_text(
+    sessionmaker: async_sessionmaker, settings: Settings, user_id: int,
+    username: str | None, full_name: str | None,
+) -> str:
+    """Текст со списком открытых голосований и прогнозом пользователя."""
+    now = datetime.now(timezone.utc)
+    tz = settings.app.bot.display_timezone
+    async with sessionmaker() as session:
+        await repo.get_or_create_user(session, user_id, username, full_name)
+        await session.commit()
+        rows = await repo.list_open_matches_with_messages(session, now)
+        if not rows:
+            return "Сейчас нет открытых голосований. Загляни позже 🙌"
+        lines = ["🗳 <b>Открытые голосования</b>", ""]
+        for match, vm in rows:
+            pred = await repo.get_prediction(session, match.id, user_id)
+            title = presentation.match_title(match)
+            when = presentation.format_kickoff(match, tz)
+            link = _vote_link(vm.chat_id, vm.message_id)
+            head = f"<a href='{link}'>{title}</a>" if link else title
+            status = (
+                f"твой прогноз: {presentation.choice_label(match, pred.choice)}"
+                if pred
+                else "ты ещё не голосовал"
+            )
+            lines.append(f"• {head}\n  🕒 {when} — {status}")
+        return "\n".join(lines)
+
+
+_DM_HINT = (
+    "Сначала напиши мне в личку команду /start — тогда смогу прислать список "
+    "(бот не может написать первым)."
+)
+
+
 @router.message(Command("matches"))
 async def cmd_matches(
     message: Message,
@@ -97,36 +132,14 @@ async def cmd_matches(
     user = message.from_user
     if user is None:
         return
-    now = datetime.now(timezone.utc)
-    tz = settings.app.bot.display_timezone
-    async with sessionmaker() as session:
-        await repo.get_or_create_user(session, user.id, user.username, user.full_name)
-        await session.commit()
-        rows = await repo.list_open_matches_with_messages(session, now)
-        if not rows:
-            text = "Сейчас нет открытых голосований. Загляни позже 🙌"
-        else:
-            lines = ["🗳 <b>Открытые голосования</b>", ""]
-            for match, vm in rows:
-                pred = await repo.get_prediction(session, match.id, user.id)
-                title = presentation.match_title(match)
-                when = presentation.format_kickoff(match, tz)
-                link = _vote_link(vm.chat_id, vm.message_id)
-                head = f"<a href='{link}'>{title}</a>" if link else title
-                status = (
-                    f"твой прогноз: {presentation.choice_label(match, pred.choice)}"
-                    if pred
-                    else "ты ещё не голосовал"
-                )
-                lines.append(f"• {head}\n  🕒 {when} — {status}")
-            text = "\n".join(lines)
-
+    text = await _build_open_matches_text(
+        sessionmaker, settings, user.id, user.username, user.full_name
+    )
     # В личке просто отвечаем списком — чистить нечего.
     if message.chat.type == "private":
         await message.answer(text, disable_web_page_preview=True)
         return
-
-    # В группе: убираем команду пользователя и шлём список в ЛС, чтобы не засорять чат.
+    # В группе: убираем команду и шлём в ЛС, чтобы не засорять чат.
     with contextlib.suppress(Exception):
         await message.delete()
     try:
@@ -135,10 +148,24 @@ async def cmd_matches(
             bot, message.chat.id, f"📬 {user.full_name}, список — у тебя в личке."
         )
     except TelegramForbiddenError:
-        await _notify_temp(
-            bot,
-            message.chat.id,
-            f"{user.full_name}, чтобы получить список в личке, сначала напиши мне "
-            "в ЛС команду /start (бот не может написать первым).",
-            delay=12,
-        )
+        await _notify_temp(bot, message.chat.id, f"{user.full_name}, {_DM_HINT}", 12)
+
+
+@router.callback_query(F.data == "mymatches")
+async def on_my_matches(
+    callback: CallbackQuery,
+    bot: Bot,
+    settings: Settings,
+    sessionmaker: async_sessionmaker,
+    **_: object,
+) -> None:
+    """Кнопка «Мои голосования»: список — в ЛС, подтверждение — всплывашкой."""
+    user = callback.from_user
+    text = await _build_open_matches_text(
+        sessionmaker, settings, user.id, user.username, user.full_name
+    )
+    try:
+        await bot.send_message(user.id, text, disable_web_page_preview=True)
+        await callback.answer("📬 Список открытых голосований — у тебя в личке.")
+    except TelegramForbiddenError:
+        await callback.answer(_DM_HINT, show_alert=True)

@@ -30,7 +30,12 @@ def build_vote_keyboard(match: Match) -> InlineKeyboardMarkup:
             callback_data=f"{VOTE_PREFIX}:{match.id}:{Choice.AWAY.value}",
         ),
     ]
-    return InlineKeyboardMarkup(inline_keyboard=[buttons])
+    menu = [
+        InlineKeyboardButton(
+            text="📋 Мои голосования", callback_data="mymatches"
+        )
+    ]
+    return InlineKeyboardMarkup(inline_keyboard=[buttons, menu])
 
 
 def parse_vote_callback(data: str) -> tuple[int, Choice] | None:
