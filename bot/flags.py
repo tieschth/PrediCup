@@ -10,7 +10,7 @@ from __future__ import annotations
 # Покрывает вероятных участников ЧМ-2026 и крупные сборные; пополняемо.
 _FIFA_TO_ISO: dict[str, str] = {
     "ARG": "AR", "AUS": "AU", "AUT": "AT", "BEL": "BE", "BRA": "BR",
-    "CAN": "CA", "CHI": "CL", "Cse": "CL", "CMR": "CM", "COL": "CO",
+    "CAN": "CA", "CHI": "CL", "CMR": "CM", "COL": "CO",
     "CRC": "CR", "CRO": "HR", "CZE": "CZ", "DEN": "DK", "ECU": "EC",
     "EGY": "EG", "ENG": "GB", "ESP": "ES", "FRA": "FR", "GER": "DE",
     "GHA": "GH", "GRE": "GR", "IRN": "IR", "ITA": "IT", "JPN": "JP",
@@ -20,7 +20,8 @@ _FIFA_TO_ISO: dict[str, str] = {
     "SCO": "GB", "SEN": "SN", "SRB": "RS", "SUI": "CH", "SWE": "SE",
     "TUN": "TN", "TUR": "TR", "UKR": "UA", "URU": "UY", "USA": "US",
     "WAL": "GB", "ALG": "DZ", "CIV": "CI", "NZL": "NZ", "JOR": "JO",
-    "UZB": "UZ",
+    "UZB": "UZ", "CUW": "CW", "HAI": "HT", "JAM": "JM", "HON": "HN",
+    "CPV": "CV", "TRI": "TT", "SLV": "SV", "GUA": "GT",
 }
 
 _NEUTRAL = "🏳️"
