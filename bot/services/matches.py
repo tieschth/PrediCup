@@ -195,14 +195,14 @@ async def _finalize(
 
     predictions = await repo.list_predictions_for_match(session, match.id)
     winners: list[int] = []
-    losers: list[int] = []
     for pred in predictions:
         pts = points_for(pred.choice, outcome, settings.app.scoring)
         pred.points_awarded = pts
-        (winners if pts > 0 else losers).append(pred.user_tg_id)
+        if pts > 0:
+            winners.append(pred.user_tg_id)
     await session.flush()
 
-    await _post_result(bot, session, settings, match, outcome, winners, losers)
+    await _post_result(bot, session, settings, match, outcome, winners)
 
 
 async def _post_result(
@@ -212,13 +212,11 @@ async def _post_result(
     match: Match,
     outcome: Choice,
     winner_ids: list[int],
-    loser_ids: list[int],
 ) -> None:
     score = f"{match.home_score}:{match.away_score}"
     title = presentation.match_title(match)
     pts = settings.app.scoring.correct_outcome
     win_names = await _names(session, winner_ids)
-    lose_names = await _names(session, loser_ids)
     lines = [
         "🏁 <b>Итог матча</b>",
         f"{title}",
@@ -226,7 +224,6 @@ async def _post_result(
         f"✅ {presentation.choice_label(match, outcome)}",
         "",
         f"Угадали (+{pts}): {', '.join(win_names) if win_names else '—'}",
-        f"Не угадали: {', '.join(lose_names) if lose_names else '—'}",
     ]
     text = "\n".join(lines)
     for chat_id in settings.app.roles.allowed_chats:
