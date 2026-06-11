@@ -102,6 +102,23 @@ docker compose logs -f
 Ожидаемо: `Стартовая синхронизация: 104 матчей` и `Бот запущен. Провайдер:
 football_data_org`. Выйти из логов — `Ctrl+C` (контейнер продолжит работать).
 
+### Если в логах `Request timeout error` при отправке сообщений
+
+Значит, с сервера недоступен `api.telegram.org` (часто бывает на серверах в РФ).
+Проверка с сервера:
+```bash
+curl -s -o /dev/null -w "telegram: HTTP %{http_code}, %{time_total}s\n" --max-time 30 https://api.telegram.org
+```
+- быстрый `HTTP 200/302` → Telegram доступен (ищи причину в другом, напр. бот не
+  добавлен в группу);
+- `HTTP 000, 30s` (таймаут) → Telegram заблокирован с этого сервера. Решения:
+  1. **Сервер вне РФ** — самый надёжный путь, прокси не нужен.
+  2. **Прокси только для Telegram:** впиши в `.env` строку `TELEGRAM_PROXY=` с
+     адресом рабочего прокси (вне РФ), например
+     `TELEGRAM_PROXY=socks5://user:pass@host:1080` или
+     `TELEGRAM_PROXY=http://user:pass@host:3128`, затем `docker compose restart`.
+     football-data.org при этом ходит напрямую (его проксировать не нужно).
+
 ## 6. Управление
 
 ```bash

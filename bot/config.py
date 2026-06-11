@@ -65,6 +65,10 @@ class Secrets(BaseSettings):
     env: str = "dev"  # prod | dev
     config_path: str = "config/config.yaml"
     db_path: str = "data/predicup.sqlite3"
+    # Прокси ТОЛЬКО для Telegram (если api.telegram.org недоступен напрямую,
+    # например, с сервера в РФ). Пусто = без прокси. Примеры:
+    #   http://user:pass@host:port  |  socks5://user:pass@host:port
+    telegram_proxy: str = ""
 
     @property
     def is_dev(self) -> bool:
