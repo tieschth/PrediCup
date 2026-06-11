@@ -3,6 +3,7 @@
 """
 from __future__ import annotations
 
+import asyncio
 import logging
 from datetime import datetime, timedelta, timezone
 
@@ -12,6 +13,7 @@ from sqlalchemy.ext.asyncio import async_sessionmaker
 
 from bot.config import Settings
 from bot.services import matches as matches_service
+from bot.services.backup import make_backup
 from bot.services.football.base import MatchProvider
 
 logger = logging.getLogger(__name__)
@@ -51,6 +53,15 @@ def setup_scheduler(
         except Exception:  # noqa: BLE001
             logger.exception("Ошибка закрытия голосований")
 
+    async def job_backup() -> None:
+        try:
+            # sqlite backup — блокирующий, уводим в поток, чтобы не держать loop
+            await asyncio.to_thread(
+                make_backup, settings.secrets.db_path, sc.backup_keep
+            )
+        except Exception:  # noqa: BLE001
+            logger.exception("Ошибка бэкапа БД")
+
     async def job_resolve() -> None:
         try:
             async with sessionmaker() as session:
@@ -87,6 +98,11 @@ def setup_scheduler(
         id="resolve",
         next_run_time=soon,
     )
+    if sc.backup_keep > 0:
+        bh, bm = _parse_hhmm(sc.backup_at_local)
+        sched.add_job(
+            job_backup, "cron", hour=bh, minute=bm, timezone=tz, id="backup"
+        )
     return sched
 
 

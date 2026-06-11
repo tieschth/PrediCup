@@ -30,6 +30,8 @@ class SchedulerCfg(BaseModel):
     sync_fixtures_hours: float = 6
     close_votes_minutes: float = 5      # как часто проверять закрытие на старте
     resolve_results_minutes: float = 5  # как часто проверять результаты
+    backup_at_local: str = "04:30"      # ежедневный бэкап БД (по display_timezone)
+    backup_keep: int = 14               # сколько последних бэкапов хранить (0 = выкл.)
 
 
 class RolesCfg(BaseModel):

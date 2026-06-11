@@ -9,5 +9,10 @@ services:
       DB_PATH: /app/data/predicup.sqlite3
       CONFIG_PATH: /app/config/config.yaml
     volumes:
-      - ./data:/app/data          # SQLite переживает рестарт
+      - ./data:/app/data          # SQLite + бэкапы переживают рестарт
       - ./config:/app/config:ro   # конфиг можно править снаружи
+    logging:                       # ротация логов, чтобы не забивать диск
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "5"

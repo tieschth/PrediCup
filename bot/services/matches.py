@@ -90,6 +90,10 @@ async def _post_vote(
             msg = await bot.send_message(chat_id, text, reply_markup=kb)
             await repo.add_vote_message(session, match.id, chat_id, msg.message_id)
             posted = True
+            logger.info(
+                "Открыто голосование: матч #%s %s vs %s (чат %s)",
+                match.id, match.home_team, match.away_team, chat_id,
+            )
         except Exception as exc:  # noqa: BLE001
             logger.error("Не удалось открыть голосование в чате %s: %s", chat_id, exc)
     return posted
@@ -202,6 +206,12 @@ async def _finalize(
             winners.append(pred.user_tg_id)
     await session.flush()
 
+    logger.info(
+        "Матч #%s %s %s:%s %s завершён, исход=%s, угадали %s из %s",
+        match.id, match.home_team, home_score, away_score, match.away_team,
+        outcome.value if hasattr(outcome, "value") else outcome,
+        len(winners), len(predictions),
+    )
     await _post_result(bot, session, settings, match, outcome, winners)
 
 

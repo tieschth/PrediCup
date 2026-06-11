@@ -19,6 +19,8 @@ scheduler:
   sync_fixtures_hours: 6         # как часто обновлять расписание
   close_votes_minutes: 5         # как часто проверять закрытие голосования на старте
   resolve_results_minutes: 5     # как часто проверять результаты завершённых матчей
+  backup_at_local: "04:30"       # ежедневный бэкап БД (в data/backups/)
+  backup_keep: 14                # сколько последних бэкапов хранить (0 = выключить)
 
 roles:
   # tg_id пользователей с доступом к /leaderboard и админ-командам

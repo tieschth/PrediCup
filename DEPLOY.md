@@ -112,17 +112,39 @@ docker compose down        # остановить (данные сохранят
 docker compose up -d        # запустить снова
 ```
 
-## 7. Данные и обновление
+## 7. Данные, бэкапы и обновление
 
 - База SQLite лежит на сервере в `./data/predicup.sqlite3` (том примонтирован в
   контейнер) — прогнозы и очки **переживают перезапуск и пересборку**.
-- Бэкап: `cp data/predicup.sqlite3 ~/predicup-backup.sqlite3`.
+- **Автобэкапы:** бот сам делает копию БД каждый день в `scheduler.backup_at_local`
+  (по умолчанию 04:30 МСК) в папку `./data/backups/`, хранит последние
+  `scheduler.backup_keep` штук (по умолчанию 14). Настраивается в `config.yaml`.
+- **Скопировать бэкапы с сервера** на свой ПК (запускать локально):
+  ```bash
+  scp -r user@SERVER_IP:~/PrediCup/data/backups ./predicup-backups
+  ```
+- **Восстановление из бэкапа:**
+  ```bash
+  docker compose down
+  cp data/backups/predicup-2026XXXX-XXXXXX.sqlite3 data/predicup.sqlite3
+  docker compose up -d
+  ```
 - Обновление кода:
   ```bash
   git pull
   docker compose up -d --build
   ```
   `.env`, `config/config.yaml` и `./data` при этом не затрагиваются.
+
+## 7.1 Логи
+
+- Смотреть: `docker compose logs -f` (живой поток) или
+  `docker compose logs --since 1h` (за последний час).
+- Логи пишутся в JSON-файлы Docker с **ротацией** (макс. 5 файлов по 10 МБ —
+  задано в docker-compose.yml), диск не забьётся.
+- В логах видно ключевые события: старт, синхронизацию расписания, открытие
+  голосований по матчам, завершение матчей с исходом и числом угадавших, бэкапы,
+  а также ошибки (с трассировкой) — этого достаточно, чтобы понять, что случилось.
 
 ## 8. Автозапуск и устойчивость
 
