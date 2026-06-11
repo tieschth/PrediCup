@@ -54,23 +54,9 @@ async def cmd_help(message: Message, **_: object) -> None:
         "Команды:\n"
         "/matches — список открытых голосований (в личку)\n"
         "/leaderboard — таблица лидеров (только для админа)\n"
-        "/id — показать id этого чата и твой tg_id (для настройки)\n"
         "/help — эта справка\n\n"
         "Прогнозы делаются кнопками под сообщением-голосовалкой в чате."
     )
-
-
-@router.message(Command("id"))
-async def cmd_id(message: Message, **_: object) -> None:
-    """Показать id чата и пользователя — нужно для заполнения config.yaml."""
-    user = message.from_user
-    chat = message.chat
-    lines = [
-        f"🆔 <b>chat_id</b>: <code>{chat.id}</code> ({chat.type})",
-    ]
-    if user is not None:
-        lines.append(f"👤 <b>твой tg_id</b>: <code>{user.id}</code>")
-    await message.reply("\n".join(lines))
 
 
 async def _build_open_matches_text(

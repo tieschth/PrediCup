@@ -25,6 +25,16 @@ from bot.services.football.mock import MockProvider
 
 router = Router(name="dev")
 
+
+@router.message(Command("id"))
+async def cmd_id(message: Message, **_: object) -> None:
+    """Показать id чата и пользователя — для заполнения config.yaml (только dev)."""
+    chat = message.chat
+    lines = [f"🆔 <b>chat_id</b>: <code>{chat.id}</code> ({chat.type})"]
+    if message.from_user is not None:
+        lines.append(f"👤 <b>твой tg_id</b>: <code>{message.from_user.id}</code>")
+    await message.reply("\n".join(lines))
+
 _DEFAULT_SCORES = {Choice.HOME: (1, 0), Choice.DRAW: (1, 1), Choice.AWAY: (0, 1)}
 
 
