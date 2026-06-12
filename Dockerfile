@@ -13,6 +13,7 @@ RUN pip install --upgrade pip && pip install .
 # Затем код
 COPY bot ./bot
 COPY config ./config
+COPY scripts ./scripts
 
 # Том для SQLite
 RUN mkdir -p /app/data
