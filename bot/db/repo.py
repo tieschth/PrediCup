@@ -8,6 +8,7 @@ from __future__ import annotations
 from datetime import datetime, timezone
 
 from sqlalchemy import func, select
+from sqlalchemy.dialects.sqlite import insert as sqlite_insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from bot.db.models import (
@@ -18,6 +19,7 @@ from bot.db.models import (
     User,
     VoteMessage,
     VoteStatus,
+    utcnow,
 )
 
 
@@ -197,13 +199,26 @@ async def get_prediction(
 async def upsert_prediction(
     session: AsyncSession, match_id: int, user_tg_id: int, choice: Choice
 ) -> Prediction:
-    pred = await get_prediction(session, match_id, user_tg_id)
-    if pred is None:
-        pred = Prediction(match_id=match_id, user_tg_id=user_tg_id, choice=choice)
-        session.add(pred)
-    else:
-        pred.choice = choice
+    """Создать или обновить прогноз атомарно (INSERT ... ON CONFLICT DO UPDATE).
+
+    Атомарность защищает от гонки при двойном/быстром нажатии: раньше два
+    одновременных запроса оба видели «прогноза нет» и оба пытались вставить —
+    второй падал с UNIQUE constraint. Теперь конфликт по (match_id, user_tg_id)
+    просто обновляет выбор.
+    """
+    choice_val = choice.value if isinstance(choice, Choice) else str(choice)
+    stmt = (
+        sqlite_insert(Prediction)
+        .values(match_id=match_id, user_tg_id=user_tg_id, choice=choice_val)
+        .on_conflict_do_update(
+            index_elements=["match_id", "user_tg_id"],
+            set_={"choice": choice_val, "updated_at": utcnow()},
+        )
+    )
+    await session.execute(stmt)
     await session.flush()
+    pred = await get_prediction(session, match_id, user_tg_id)
+    assert pred is not None
     return pred
 
 
