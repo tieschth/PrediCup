@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import os
 
 from aiogram import Bot, Dispatcher
 from aiogram.client.default import DefaultBotProperties
@@ -15,6 +16,7 @@ from bot.handlers import admin, common, dev, predictions
 from bot.scheduler import setup_scheduler
 from bot.services import matches as matches_service
 from bot.services.football.factory import build_provider
+from bot.services.labels import apply_labels_from_file, default_labels_path
 
 logging.basicConfig(
     level=logging.INFO,
@@ -31,6 +33,19 @@ async def main() -> None:
     init_engine(settings.db_url, settings.secrets.db_path)
     await init_db()
     sessionmaker = get_sessionmaker()
+
+    # Авто-импорт отображаемых имён из data/labels.csv (если файл есть).
+    labels_path = default_labels_path(settings.secrets.db_path)
+    if os.path.exists(labels_path):
+        try:
+            async with sessionmaker() as session:
+                updated, missing = await apply_labels_from_file(session, labels_path)
+                await session.commit()
+            logger.info("Метки имён: применено %s, не найдено %s", updated, len(missing))
+            if missing:
+                logger.warning("Метки не найдены для: %s", ", ".join(missing))
+        except Exception:  # noqa: BLE001
+            logger.exception("Не удалось применить labels.csv")
 
     provider = build_provider(settings)
 
