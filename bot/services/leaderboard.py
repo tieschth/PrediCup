@@ -1,19 +1,12 @@
 """Формирование таблицы лидеров."""
 from __future__ import annotations
 
-import html
-
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from bot.db import repo
-from bot.db.models import User
+from bot.services.presentation import display_name
 
 _MEDALS = {1: "🥇", 2: "🥈", 3: "🥉"}
-
-
-def _display(user: User) -> str:
-    name = user.display_name or (f"@{user.username}" if user.username else None)
-    return html.escape(name or str(user.tg_id))
 
 
 async def render_leaderboard(session: AsyncSession) -> str:
@@ -23,5 +16,5 @@ async def render_leaderboard(session: AsyncSession) -> str:
     lines = ["🏆 <b>Таблица лидеров</b>", ""]
     for i, (user, pts) in enumerate(rows, start=1):
         prefix = _MEDALS.get(i, f"{i}.")
-        lines.append(f"{prefix} {_display(user)} — <b>{pts}</b>")
+        lines.append(f"{prefix} {display_name(user)} — <b>{pts}</b>")
     return "\n".join(lines)

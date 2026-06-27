@@ -9,7 +9,7 @@ from __future__ import annotations
 import uuid
 from datetime import datetime, timedelta, timezone
 
-from bot.db.models import MatchStatus
+from bot.db.models import MatchDuration, MatchStatus
 from bot.services.football.base import FixtureDTO, MatchProvider, ResultDTO
 
 
@@ -44,13 +44,22 @@ class MockProvider(MatchProvider):
         return dto
 
     def set_result(
-        self, provider_match_id: str, home_score: int, away_score: int
+        self,
+        provider_match_id: str,
+        home_score: int,
+        away_score: int,
+        duration: str = MatchDuration.REGULAR.value,
+        pen_home: int | None = None,
+        pen_away: int | None = None,
     ) -> None:
         self._results[provider_match_id] = ResultDTO(
             provider_match_id=provider_match_id,
             status=MatchStatus.FINISHED,
             home_score=home_score,
             away_score=away_score,
+            duration=duration,
+            pen_home=pen_home,
+            pen_away=pen_away,
         )
 
     async def fixtures(self) -> list[FixtureDTO]:

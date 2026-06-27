@@ -18,7 +18,7 @@ from sqlalchemy.ext.asyncio import async_sessionmaker
 from bot.access import is_admin
 from bot.config import Settings
 from bot.db import repo
-from bot.db.models import Choice
+from bot.db.models import Choice, MatchDuration
 from bot.services import matches as matches_service
 from bot.services.football.base import MatchProvider
 from bot.services.football.mock import MockProvider
@@ -138,6 +138,31 @@ async def cmd_devopen(
     await message.reply(f"✅ Открыто голосований: {opened}.")
 
 
+_USAGE = (
+    "Использование: /devresult [match_id] <счёт|HOME|DRAW|AWAY> [ET|PEN] [пен.счёт]\n"
+    "Примеры:\n"
+    "  /devresult 5 2:1            — основное время\n"
+    "  /devresult HOME             — основное (счёт по умолчанию)\n"
+    "  /devresult 73 1:1 ET        — победа в доп. время\n"
+    "  /devresult 73 1:1 PEN 4:3   — победа по пенальти"
+)
+_DUR = {
+    "ET": MatchDuration.EXTRA_TIME.value, "EXTRA": MatchDuration.EXTRA_TIME.value,
+    "PEN": MatchDuration.PENALTY_SHOOTOUT.value,
+    "PENALTY": MatchDuration.PENALTY_SHOOTOUT.value,
+}
+
+
+def _parse_score(token: str) -> tuple[int, int] | None:
+    if ":" not in token:
+        return None
+    try:
+        h, a = token.split(":", 1)
+        return int(h), int(a)
+    except ValueError:
+        return None
+
+
 @router.message(Command("devresult"))
 async def cmd_devresult(
     message: Message,
@@ -152,30 +177,31 @@ async def cmd_devresult(
         await message.reply(err)
         return
     parts = (message.text or "").split()[1:]
-    # необязательный первый аргумент — id матча; иначе берём последний с голосовалкой
     match_id: int | None = None
     if parts and parts[0].isdigit():
         match_id = int(parts[0])
         parts = parts[1:]
     if not parts:
-        await message.reply(
-            "Использование: /devresult [match_id] <HOME|DRAW|AWAY> [2:1]"
-        )
+        await message.reply(_USAGE)
         return
-    try:
-        outcome = Choice(parts[0].upper())
-    except ValueError:
-        await message.reply("Исход: HOME, DRAW или AWAY.")
-        return
-    if len(parts) > 1 and ":" in parts[1]:
+
+    # первый токен — счёт «h:a» или ключевое слово HOME/DRAW/AWAY
+    score = _parse_score(parts[0])
+    if score is None:
         try:
-            h_str, a_str = parts[1].split(":", 1)
-            home_score, away_score = int(h_str), int(a_str)
+            score = _DEFAULT_SCORES[Choice(parts[0].upper())]
         except ValueError:
-            await message.reply("Счёт в формате 2:1.")
+            await message.reply(_USAGE)
             return
-    else:
-        home_score, away_score = _DEFAULT_SCORES[outcome]
+    home_score, away_score = score
+
+    duration = MatchDuration.REGULAR.value
+    pen_home = pen_away = None
+    for tok in parts[1:]:
+        if tok.upper() in _DUR:
+            duration = _DUR[tok.upper()]
+        elif _parse_score(tok):
+            pen_home, pen_away = _parse_score(tok)
 
     async with sessionmaker() as session:
         if match_id is not None:
@@ -185,10 +211,13 @@ async def cmd_devresult(
         if match is None:
             await message.reply("Нет матча для резолва (укажи match_id из /matches).")
             return
-        # для mock также положим результат в провайдер (на случай авто-резолва)
         if isinstance(provider, MockProvider):
-            provider.set_result(match.provider_match_id, home_score, away_score)
+            provider.set_result(
+                match.provider_match_id, home_score, away_score,
+                duration, pen_home, pen_away,
+            )
         await matches_service.force_resolve(
-            bot, session, settings, match, home_score, away_score, outcome
+            bot, session, settings, match,
+            home_score, away_score, duration, pen_home, pen_away,
         )
     await message.reply(f"🏁 Матч #{match.id} зарезолвлен, очки начислены.")

@@ -8,7 +8,7 @@ from __future__ import annotations
 
 import html
 import logging
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 
 from aiogram import Bot
 from aiogram.exceptions import TelegramBadRequest
@@ -16,11 +16,11 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from bot.config import Settings
 from bot.db import repo
-from bot.db.models import Choice, Match, MatchStatus
+from bot.db.models import Choice, Match, MatchDuration, MatchStatus, User
 from bot.keyboards.vote import build_vote_keyboard
 from bot.services import presentation
-from bot.services.football.base import MatchProvider
-from bot.services.scoring import points_for
+from bot.services.football.base import MatchProvider, ResultDTO
+from bot.services.scoring import winning_choices
 
 logger = logging.getLogger(__name__)
 
@@ -45,6 +45,9 @@ async def sync_fixtures(session: AsyncSession, provider: MatchProvider) -> int:
             status=f.status,
             home_score=f.home_score,
             away_score=f.away_score,
+            duration=f.duration,
+            pen_home=f.pen_home,
+            pen_away=f.pen_away,
         )
     await session.commit()
     return len(fixtures)
@@ -144,6 +147,36 @@ async def _close_match(
 
 
 # --------------------------- резолв результата -------------------------------
+def _result_changed(match: Match, r: ResultDTO) -> bool:
+    return (
+        match.home_score != r.home_score
+        or match.away_score != r.away_score
+        or (match.duration or MatchDuration.REGULAR.value) != r.duration
+        or match.pen_home != r.pen_home
+        or match.pen_away != r.pen_away
+    )
+
+
+def _apply_result_fields(match: Match, r: ResultDTO) -> None:
+    match.home_score = r.home_score
+    match.away_score = r.away_score
+    match.duration = r.duration
+    match.pen_home = r.pen_home
+    match.pen_away = r.pen_away
+    match.status = MatchStatus.FINISHED
+
+
+def _score_predictions(match: Match, predictions, scoring) -> dict[int, int]:
+    """Проставить очки прогнозам по текущему результату. Возвращает {pred_id: очки}."""
+    wins = winning_choices(match, scoring)
+    new_points: dict[int, int] = {}
+    for pred in predictions:
+        pts = wins.get(str(pred.choice), 0)
+        pred.points_awarded = pts
+        new_points[pred.id] = pts
+    return new_points
+
+
 async def resolve_results(
     bot: Bot, session: AsyncSession, settings: Settings, provider: MatchProvider
 ) -> int:
@@ -153,14 +186,55 @@ async def resolve_results(
         result = await provider.result(match.provider_match_id)
         if result is None or result.status != MatchStatus.FINISHED:
             continue
-        if result.outcome is None:
+        if result.home_score is None or result.away_score is None:
             continue
-        await _finalize(bot, session, settings, match, result.home_score,
-                        result.away_score, result.outcome)
+        _apply_result_fields(match, result)
+        await _finalize(bot, session, settings, match)
         resolved += 1
     if resolved:
         await session.commit()
     return resolved
+
+
+async def reverify_results(
+    bot: Bot, session: AsyncSession, settings: Settings, provider: MatchProvider
+) -> int:
+    """Повторно сверить недавно завершённые матчи с API: если счёт/исход
+    скорректирован (отменённые голы и т.п.) — обновить и пересчитать очки, при
+    изменении баллов опубликовать поправку в чат."""
+    window_h = settings.app.scheduler.reverify_window_hours
+    since = _now() - timedelta(hours=window_h)
+    matches = await repo.list_resolved_in_window(session, since)
+    changed = 0
+    for match in matches:
+        result = await provider.result(match.provider_match_id)
+        if result is None or result.status != MatchStatus.FINISHED:
+            continue
+        if result.home_score is None or result.away_score is None:
+            continue
+        if not _result_changed(match, result):
+            continue
+
+        predictions = await repo.list_predictions_for_match(session, match.id)
+        old_points = {p.id: p.points_awarded for p in predictions}
+        old_score = f"{match.home_score}:{match.away_score}"
+
+        _apply_result_fields(match, result)
+        new_points = _score_predictions(match, predictions, settings.app.scoring)
+        await session.flush()
+        changed += 1
+
+        points_changed = new_points != old_points
+        logger.info(
+            "Перепроверка: матч #%s обновлён %s -> %s:%s (duration=%s), очки %s",
+            match.id, old_score, match.home_score, match.away_score,
+            match.duration, "пересчитаны" if points_changed else "без изменений",
+        )
+        if points_changed:
+            await _post_correction(bot, session, settings, match, old_score)
+    if changed:
+        await session.commit()
+    return changed
 
 
 async def force_resolve(
@@ -170,89 +244,116 @@ async def force_resolve(
     match: Match,
     home_score: int,
     away_score: int,
-    outcome: Choice,
+    duration: str = MatchDuration.REGULAR.value,
+    pen_home: int | None = None,
+    pen_away: int | None = None,
 ) -> None:
     """Ручной резолв матча (дев-команда /devresult), минуя проверку kickoff."""
-    await _finalize(bot, session, settings, match, home_score, away_score, outcome)
+    _apply_result_fields(
+        match,
+        ResultDTO(
+            provider_match_id=match.provider_match_id,
+            status=MatchStatus.FINISHED,
+            home_score=home_score,
+            away_score=away_score,
+            duration=duration,
+            pen_home=pen_home,
+            pen_away=pen_away,
+        ),
+    )
+    await _finalize(bot, session, settings, match)
     await session.commit()
 
 
 async def _finalize(
-    bot: Bot,
-    session: AsyncSession,
-    settings: Settings,
-    match: Match,
-    home_score: int | None,
-    away_score: int | None,
-    outcome: Choice,
+    bot: Bot, session: AsyncSession, settings: Settings, match: Match
 ) -> None:
-    """Зафиксировать результат, начислить очки, опубликовать итог. Используется и
-    резолвером, и дев-командой /devresult."""
-    match.home_score = home_score
-    match.away_score = away_score
-    match.outcome = outcome
-    match.status = MatchStatus.FINISHED
+    """Начислить очки по текущему результату матча и опубликовать итог."""
     match.resolved = True
-
-    # на всякий случай закрываем голосование, если ещё открыто
     await _close_match(bot, session, settings, match)
 
     predictions = await repo.list_predictions_for_match(session, match.id)
-    winners: list[int] = []
-    for pred in predictions:
-        pts = points_for(pred.choice, outcome, settings.app.scoring)
-        pred.points_awarded = pts
-        if pts > 0:
-            winners.append(pred.user_tg_id)
+    new_points = _score_predictions(match, predictions, settings.app.scoring)
+    winners = sum(1 for v in new_points.values() if v > 0)
     await session.flush()
 
     logger.info(
-        "Матч #%s %s %s:%s %s завершён, исход=%s, угадали %s из %s",
-        match.id, match.home_team, home_score, away_score, match.away_team,
-        outcome.value if hasattr(outcome, "value") else outcome,
-        len(winners), len(predictions),
+        "Матч #%s %s %s завершён (%s), угадали %s из %s",
+        match.id, match.home_team, match.away_team,
+        _score_line(match), winners, len(predictions),
     )
-    await _post_result(bot, session, settings, match, outcome, winners)
+    await _post_result(bot, session, settings, match)
+
+
+def _score_line(match: Match) -> str:
+    """Человекочитаемый счёт с учётом доп.времени/пенальти."""
+    base = f"{match.home_score}:{match.away_score}"
+    dur = (match.duration or MatchDuration.REGULAR.value).upper()
+    if dur == MatchDuration.EXTRA_TIME.value:
+        return f"{base} (доп. время)"
+    if dur == MatchDuration.PENALTY_SHOOTOUT.value:
+        pens = ""
+        if match.pen_home is not None and match.pen_away is not None:
+            pens = f", пенальти {match.pen_home}:{match.pen_away}"
+        return f"{base} (осн.+доп.){pens}"
+    return base
+
+
+async def _winners_block(session: AsyncSession, match: Match, settings: Settings) -> str:
+    """Список угадавших, сгруппированный по варианту (для плей-офф — с баллами)."""
+    wins = winning_choices(match, settings.app.scoring)
+    if not wins:
+        return "Угадавших нет."
+    predictions = await repo.list_predictions_for_match(session, match.id)
+    lines: list[str] = []
+    # порядок отображения вариантов стабильный: по убыванию очков, затем по коду
+    for code, pts in sorted(wins.items(), key=lambda kv: (-kv[1], kv[0])):
+        uids = [p.user_tg_id for p in predictions if str(p.choice) == code]
+        names = await _names(session, uids)
+        label = presentation.choice_label(match, code)
+        who = ", ".join(names) if names else "—"
+        lines.append(f"✅ {label} (+{pts}): {who}")
+    return "\n".join(lines)
 
 
 async def _post_result(
-    bot: Bot,
-    session: AsyncSession,
-    settings: Settings,
-    match: Match,
-    outcome: Choice,
-    winner_ids: list[int],
+    bot: Bot, session: AsyncSession, settings: Settings, match: Match
 ) -> None:
-    score = f"{match.home_score}:{match.away_score}"
-    title = presentation.match_title(match)
-    pts = settings.app.scoring.correct_outcome
-    win_names = await _names(session, winner_ids)
-    lines = [
-        "🏁 <b>Итог матча</b>",
-        f"{title}",
-        f"📊 Счёт: <b>{score}</b>",
-        f"✅ {presentation.choice_label(match, outcome)}",
-        "",
-        f"Угадали (+{pts}): {', '.join(win_names) if win_names else '—'}",
-    ]
-    text = "\n".join(lines)
+    block = await _winners_block(session, match, settings)
+    text = (
+        "🏁 <b>Итог матча</b>\n"
+        f"{presentation.match_title(match)}\n"
+        f"📊 Счёт: <b>{_score_line(match)}</b>\n\n"
+        f"{block}"
+    )
+    await _broadcast(bot, settings, text)
+
+
+async def _post_correction(
+    bot: Bot, session: AsyncSession, settings: Settings, match: Match, old_score: str
+) -> None:
+    block = await _winners_block(session, match, settings)
+    text = (
+        "✏️ <b>Результат матча уточнён</b>\n"
+        f"{presentation.match_title(match)}\n"
+        f"Было: {old_score} → стало: <b>{_score_line(match)}</b>\n"
+        "Очки пересчитаны.\n\n"
+        f"{block}"
+    )
+    await _broadcast(bot, settings, text)
+
+
+async def _broadcast(bot: Bot, settings: Settings, text: str) -> None:
     for chat_id in settings.app.roles.allowed_chats:
         try:
             await bot.send_message(chat_id, text)
         except Exception as exc:  # noqa: BLE001
-            logger.error("Не удалось отправить итог в чат %s: %s", chat_id, exc)
+            logger.error("Не удалось отправить сообщение в чат %s: %s", chat_id, exc)
 
 
 async def _names(session: AsyncSession, user_ids: list[int]) -> list[str]:
-    from bot.db.models import User
-
     out: list[str] = []
     for uid in user_ids:
         user = await session.get(User, uid)
-        if user is None:
-            out.append(str(uid))
-        elif user.username:
-            out.append(f"@{user.username}")
-        else:
-            out.append(html.escape(user.display_name or str(uid)))
+        out.append(presentation.display_name(user) if user else str(uid))
     return out

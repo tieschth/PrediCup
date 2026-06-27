@@ -65,10 +65,24 @@ class FootballDataOrgProvider(MatchProvider):
         return self._cache
 
     @staticmethod
-    def _parse(m: dict) -> FixtureDTO:
+    def _score_parts(m: dict) -> tuple[str, int | None, int | None, int | None, int | None]:
+        """(duration, full_home, full_away, pen_home, pen_away)."""
+        score = m.get("score", {})
+        full = score.get("fullTime", {}) or {}
+        pens = score.get("penalties", {}) or {}
+        duration = score.get("duration") or "REGULAR"
+        return (
+            duration,
+            full.get("home"),
+            full.get("away"),
+            pens.get("home"),
+            pens.get("away"),
+        )
+
+    @classmethod
+    def _parse(cls, m: dict) -> FixtureDTO:
         home = m.get("homeTeam", {})
         away = m.get("awayTeam", {})
-        score = m.get("score", {}).get("fullTime", {})
         kickoff = datetime.fromisoformat(
             m["utcDate"].replace("Z", "+00:00")
         ).astimezone(timezone.utc)
@@ -77,6 +91,7 @@ class FootballDataOrgProvider(MatchProvider):
         away_name = away.get("name") or away.get("shortName") or "TBD"
         home_team, home_code = canonical(home_name, (home.get("tla") or ""))
         away_team, away_code = canonical(away_name, (away.get("tla") or ""))
+        duration, fh, fa, ph, pa = cls._score_parts(m)
         return FixtureDTO(
             provider_match_id=str(m["id"]),
             home_team=home_team,
@@ -86,8 +101,11 @@ class FootballDataOrgProvider(MatchProvider):
             kickoff_utc=kickoff,
             stage=(m.get("stage") or "group").lower(),
             status=status,
-            home_score=score.get("home"),
-            away_score=score.get("away"),
+            home_score=fh,
+            away_score=fa,
+            duration=duration,
+            pen_home=ph,
+            pen_away=pa,
         )
 
     async def fixtures(self) -> list[FixtureDTO]:
@@ -100,13 +118,16 @@ class FootballDataOrgProvider(MatchProvider):
         m = matches.get(str(provider_match_id))
         if m is None:
             return None
-        score = m.get("score", {}).get("fullTime", {})
         status = _STATUS_MAP.get(m.get("status", ""), MatchStatus.SCHEDULED)
+        duration, fh, fa, ph, pa = self._score_parts(m)
         return ResultDTO(
             provider_match_id=str(m["id"]),
             status=status,
-            home_score=score.get("home"),
-            away_score=score.get("away"),
+            home_score=fh,
+            away_score=fa,
+            duration=duration,
+            pen_home=ph,
+            pen_away=pa,
         )
 
     async def close(self) -> None:

@@ -73,6 +73,17 @@ def setup_scheduler(
         except Exception:  # noqa: BLE001
             logger.exception("Ошибка resolve_results")
 
+    async def job_reverify() -> None:
+        try:
+            async with sessionmaker() as session:
+                n = await matches_service.reverify_results(
+                    bot, session, settings, provider
+                )
+            if n:
+                logger.info("reverify_results: обновлено матчей %s", n)
+        except Exception:  # noqa: BLE001
+            logger.exception("Ошибка reverify_results")
+
     # Закрытие и резолв стартуют почти сразу после старта (а не через полный
     # интервал). Открытие — по расписанию (крон), плюс «догоняющее» открытие на
     # старте бота делает main.py (на случай рестарта в течение дня).
@@ -97,6 +108,13 @@ def setup_scheduler(
         minutes=sc.resolve_results_minutes,
         id="resolve",
         next_run_time=soon,
+    )
+    sched.add_job(
+        job_reverify,
+        "interval",
+        minutes=sc.reverify_minutes,
+        id="reverify",
+        next_run_time=datetime.now(timezone.utc) + timedelta(seconds=30),
     )
     if sc.backup_keep > 0:
         bh, bm = _parse_hhmm(sc.backup_at_local)

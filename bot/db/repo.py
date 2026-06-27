@@ -71,6 +71,9 @@ async def upsert_match(
     status: MatchStatus = MatchStatus.SCHEDULED,
     home_score: int | None = None,
     away_score: int | None = None,
+    duration: str | None = None,
+    pen_home: int | None = None,
+    pen_away: int | None = None,
 ) -> Match:
     match = await get_match_by_provider_id(session, provider_match_id)
     if match is None:
@@ -89,6 +92,12 @@ async def upsert_match(
             match.home_score = home_score
         if away_score is not None:
             match.away_score = away_score
+        if duration is not None:
+            match.duration = duration
+        if pen_home is not None:
+            match.pen_home = pen_home
+        if pen_away is not None:
+            match.pen_away = pen_away
     await session.flush()
     return match
 
@@ -111,6 +120,8 @@ async def list_matches_for_vote_opening(
     matches = list(res.scalars().all())
     out: list[Match] = []
     for m in matches:
+        if not m.teams_known:
+            continue  # плей-офф с ещё не определёнными участниками (TBD)
         if not await has_open_vote_message(session, m.id):
             out.append(m)
     return out
@@ -132,6 +143,19 @@ async def list_finished_unresolved(session: AsyncSession) -> list[Match]:
         select(Match).where(
             Match.status == MatchStatus.FINISHED, Match.resolved.is_(False)
         )
+    )
+    return list(res.scalars().all())
+
+
+async def list_resolved_in_window(
+    session: AsyncSession, since: datetime
+) -> list[Match]:
+    """Уже зарезолвленные матчи, начавшиеся не раньше `since` — кандидаты на
+    повторную проверку результата (API досылает корректировки счёта)."""
+    res = await session.execute(
+        select(Match)
+        .where(Match.resolved.is_(True), Match.kickoff_utc >= since)
+        .order_by(Match.kickoff_utc)
     )
     return list(res.scalars().all())
 
@@ -288,16 +312,52 @@ async def clear_matches_and_predictions(session: AsyncSession) -> None:
 
 
 async def leaderboard(session: AsyncSession) -> list[tuple[User, int]]:
-    """Список (User, сумма очков) по убыванию очков. Только участники, сделавшие
-    хотя бы один прогноз (inner join), — даже если очков пока 0."""
-    pts = func.coalesce(func.sum(Prediction.points_awarded), 0)
+    """Список (User, сумма очков) по убыванию. Только участники, сделавшие хотя
+    бы один прогноз (inner join). Итог = очки за прогнозы + ручные бонусы."""
+    pred_pts = func.coalesce(func.sum(Prediction.points_awarded), 0)
+    total = (pred_pts + func.coalesce(User.bonus_points, 0)).label("total")
     res = await session.execute(
-        select(User, pts.label("pts"))
+        select(User, total)
         .join(Prediction, Prediction.user_tg_id == User.tg_id)
         .group_by(User.tg_id)
-        .order_by(pts.desc(), func.count(Prediction.id).desc(), User.tg_id)
+        .order_by(total.desc(), func.count(Prediction.id).desc(), User.tg_id)
     )
     return [(row[0], int(row[1])) for row in res.all()]
+
+
+async def adjust_bonus(session: AsyncSession, tg_id: int, delta: int) -> int | None:
+    """Добавить (или вычесть) ручные бонусные очки пользователю. Возвращает новый
+    bonus_points или None, если пользователь не найден."""
+    user = await session.get(User, tg_id)
+    if user is None:
+        return None
+    user.bonus_points = (user.bonus_points or 0) + delta
+    await session.flush()
+    return user.bonus_points
+
+
+async def find_user_by_username(
+    session: AsyncSession, username: str
+) -> User | None:
+    uname = username.lstrip("@")
+    res = await session.execute(
+        select(User).where(func.lower(User.username) == uname.lower())
+    )
+    return res.scalars().first()
+
+
+async def set_label(session: AsyncSession, tg_id: int, label: str | None) -> bool:
+    user = await session.get(User, tg_id)
+    if user is None:
+        return False
+    user.label = label
+    await session.flush()
+    return True
+
+
+async def all_users(session: AsyncSession) -> list[User]:
+    res = await session.execute(select(User).order_by(User.tg_id))
+    return list(res.scalars().all())
 
 
 def _add_seconds(dt: datetime, seconds: float) -> datetime:

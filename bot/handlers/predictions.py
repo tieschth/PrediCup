@@ -15,6 +15,7 @@ from sqlalchemy.ext.asyncio import async_sessionmaker
 
 from bot.config import Settings
 from bot.db import repo
+from bot.db.models import Choice, PlayoffChoice
 from bot.keyboards.vote import VOTE_PREFIX, parse_vote_callback
 from bot.services import matches as matches_service
 from bot.services import presentation
@@ -22,6 +23,13 @@ from bot.services.notifications import notify_admins
 
 logger = logging.getLogger(__name__)
 router = Router(name="predictions")
+
+_GROUP_CODES = {c.value for c in Choice}
+_PLAYOFF_CODES = {c.value for c in PlayoffChoice}
+
+
+def _choice_fits_stage(is_playoff: bool, code: str) -> bool:
+    return code in (_PLAYOFF_CODES if is_playoff else _GROUP_CODES)
 
 
 @router.callback_query(F.data.startswith(f"{VOTE_PREFIX}:"))
@@ -49,6 +57,9 @@ async def on_vote(
                 await callback.answer(
                     "⏱ Голосование уже закрыто — матч начался.", show_alert=True
                 )
+                return
+            if not _choice_fits_stage(match.is_playoff, choice):
+                await callback.answer("Некорректный вариант для этого матча", show_alert=True)
                 return
 
             await repo.get_or_create_user(

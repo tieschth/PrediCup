@@ -63,6 +63,34 @@ class Choice(str, enum.Enum):
     AWAY = "AWAY"
 
 
+class PlayoffChoice(str, enum.Enum):
+    """Варианты голосования на плей-офф (7 исходов).
+
+    R_* — в основное время; ET_* — в дополнительное; PEN_* — по пенальти.
+    R_DRAW — ничья в основное время (матч пошёл в доп.время/пенальти).
+    """
+
+    R_HOME = "R_HOME"
+    R_AWAY = "R_AWAY"
+    R_DRAW = "R_DRAW"
+    ET_HOME = "ET_HOME"
+    ET_AWAY = "ET_AWAY"
+    PEN_HOME = "PEN_HOME"
+    PEN_AWAY = "PEN_AWAY"
+
+
+# Стадии плей-офф (по названиям football-data.org). Всё остальное — групповой этап.
+PLAYOFF_STAGES = frozenset(
+    {"LAST_32", "LAST_16", "QUARTER_FINALS", "SEMI_FINALS", "THIRD_PLACE", "FINAL"}
+)
+
+
+class MatchDuration(str, enum.Enum):
+    REGULAR = "REGULAR"
+    EXTRA_TIME = "EXTRA_TIME"
+    PENALTY_SHOOTOUT = "PENALTY_SHOOTOUT"
+
+
 class MatchStatus(str, enum.Enum):
     SCHEDULED = "SCHEDULED"
     LIVE = "LIVE"
@@ -80,6 +108,10 @@ class User(Base):
     tg_id: Mapped[int] = mapped_column(BigInteger, primary_key=True)
     username: Mapped[str | None] = mapped_column(String(64), nullable=True)
     display_name: Mapped[str | None] = mapped_column(String(128), nullable=True)
+    # Заданное вручную отображаемое имя (приоритет в таблице/итогах над username).
+    label: Mapped[str | None] = mapped_column(String(128), nullable=True)
+    # Ручная корректировка очков (бонусы/штрафы), суммируется в таблице лидеров.
+    bonus_points: Mapped[int] = mapped_column(Integer, default=0)
     first_seen: Mapped[datetime] = mapped_column(UTCDateTime, default=utcnow)
 
 
@@ -97,9 +129,13 @@ class Match(Base):
     status: Mapped[MatchStatus] = mapped_column(
         String(16), default=MatchStatus.SCHEDULED
     )
+    # fullTime — итоговый счёт (включая доп.время). penalties — серия пенальти.
     home_score: Mapped[int | None] = mapped_column(Integer, nullable=True)
     away_score: Mapped[int | None] = mapped_column(Integer, nullable=True)
-    outcome: Mapped[Choice | None] = mapped_column(String(8), nullable=True)
+    duration: Mapped[str] = mapped_column(String(20), default=MatchDuration.REGULAR.value)
+    pen_home: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    pen_away: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    outcome: Mapped[str | None] = mapped_column(String(12), nullable=True)
     resolved: Mapped[bool] = mapped_column(default=False)
 
     predictions: Mapped[list["Prediction"]] = relationship(
@@ -108,6 +144,19 @@ class Match(Base):
     vote_messages: Mapped[list["VoteMessage"]] = relationship(
         back_populates="match", cascade="all, delete-orphan"
     )
+
+    @property
+    def is_playoff(self) -> bool:
+        return self.stage.upper() in PLAYOFF_STAGES
+
+    @property
+    def teams_known(self) -> bool:
+        """Команды определены (не плейсхолдеры плей-офф вроде TBD)."""
+        bad = {"", "TBD", "NONE"}
+        return (
+            (self.home_team or "").strip().upper() not in bad
+            and (self.away_team or "").strip().upper() not in bad
+        )
 
 
 class Prediction(Base):

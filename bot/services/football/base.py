@@ -10,7 +10,7 @@ from abc import ABC, abstractmethod
 from dataclasses import dataclass
 from datetime import datetime
 
-from bot.db.models import Choice, MatchStatus
+from bot.db.models import Choice, MatchDuration, MatchStatus
 
 
 @dataclass(slots=True)
@@ -27,16 +27,22 @@ class FixtureDTO:
     status: MatchStatus = MatchStatus.SCHEDULED
     home_score: int | None = None
     away_score: int | None = None
+    duration: str = MatchDuration.REGULAR.value
+    pen_home: int | None = None
+    pen_away: int | None = None
 
 
 @dataclass(slots=True)
 class ResultDTO:
-    """Итог завершённого матча."""
+    """Итог завершённого матча. home_score/away_score — fullTime (с доп.временем)."""
 
     provider_match_id: str
     status: MatchStatus
     home_score: int | None
     away_score: int | None
+    duration: str = MatchDuration.REGULAR.value
+    pen_home: int | None = None
+    pen_away: int | None = None
 
     @property
     def outcome(self) -> Choice | None:

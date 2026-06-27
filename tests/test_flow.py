@@ -46,7 +46,7 @@ async def test_full_flow(settings, sessionmaker, fake_bot, provider):
     async with sessionmaker() as session:
         match = await repo.get_latest_unresolved_match(session)
         await matches_service.force_resolve(
-            fake_bot, session, settings, match, 2, 1, Choice.HOME
+            fake_bot, session, settings, match, 2, 1
         )
 
     # 6. Очки: все трое угадали HOME -> по 3 очка

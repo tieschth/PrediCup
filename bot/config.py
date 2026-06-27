@@ -30,6 +30,10 @@ class SchedulerCfg(BaseModel):
     sync_fixtures_hours: float = 6
     close_votes_minutes: float = 5      # как часто проверять закрытие на старте
     resolve_results_minutes: float = 5  # как часто проверять результаты
+    # Повторная проверка уже завершённых матчей: API досылает корректировки
+    # счёта (отменённые голы) спустя часы — ловим их и пересчитываем очки.
+    reverify_minutes: float = 30
+    reverify_window_hours: float = 48
     backup_at_local: str = "04:30"      # ежедневный бэкап БД (по display_timezone)
     backup_keep: int = 14               # сколько последних бэкапов хранить (0 = выкл.)
 
@@ -40,7 +44,11 @@ class RolesCfg(BaseModel):
 
 
 class ScoringCfg(BaseModel):
-    correct_outcome: int = 3
+    # Групповой этап и «в основное время» (победа/ничья) — 1 балл.
+    correct_outcome: int = 1
+    # Плей-офф: победа в доп. время и победа по пенальти — 2 балла.
+    extra_time: int = 2
+    penalty: int = 2
 
 
 class AppConfig(BaseModel):
