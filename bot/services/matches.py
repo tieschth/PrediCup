@@ -8,10 +8,11 @@ from __future__ import annotations
 
 import html
 import logging
+import time
 from datetime import datetime, timedelta, timezone
 
 from aiogram import Bot
-from aiogram.exceptions import TelegramBadRequest
+from aiogram.exceptions import TelegramBadRequest, TelegramRetryAfter
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from bot.config import Settings
@@ -102,10 +103,25 @@ async def _post_vote(
     return posted
 
 
+# Не правим счётчик чаще, чем раз в N секунд на матч — иначе при частых голосах
+# Telegram включает flood control (RetryAfter). Счётчик может слегка отставать.
+_EDIT_MIN_INTERVAL = 20.0
+_last_count_edit: dict[int, float] = {}
+
+
 async def refresh_vote_message_counts(
     bot: Bot, session: AsyncSession, settings: Settings, match: Match
 ) -> None:
-    """Обновить счётчик прогнозов в сообщениях голосовалки (после нового голоса)."""
+    """Обновить счётчик прогнозов в сообщениях голосовалки (после нового голоса).
+
+    Best-effort: при flood control или иной ошибке просто пропускаем — голос уже
+    сохранён, а актуальный счётчик подтянется при следующем обновлении/закрытии.
+    """
+    now = time.monotonic()
+    if now - _last_count_edit.get(match.id, 0.0) < _EDIT_MIN_INTERVAL:
+        return
+    _last_count_edit[match.id] = now
+
     tz = settings.app.bot.display_timezone
     count = await repo.count_predictions(session, match.id)
     text = presentation.vote_message_text(match, tz, count)
@@ -115,8 +131,10 @@ async def refresh_vote_message_counts(
             await bot.edit_message_text(
                 text, chat_id=vm.chat_id, message_id=vm.message_id, reply_markup=kb
             )
-        except TelegramBadRequest:
-            pass  # текст не изменился / сообщение недоступно — не критично
+        except (TelegramBadRequest, TelegramRetryAfter):
+            pass  # не изменилось / недоступно / лимит — не критично
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("Не удалось обновить счётчик матча %s: %s", match.id, exc)
 
 
 # --------------------------- закрытие голосования ----------------------------
@@ -141,8 +159,10 @@ async def _close_match(
             await bot.edit_message_text(
                 text, chat_id=vm.chat_id, message_id=vm.message_id, reply_markup=None
             )
-        except TelegramBadRequest:
+        except (TelegramBadRequest, TelegramRetryAfter):
             pass
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("Не удалось закрыть голосовалку матча %s: %s", match.id, exc)
     await repo.close_vote_messages_for_match(session, match.id)
 
 

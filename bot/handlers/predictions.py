@@ -47,6 +47,7 @@ async def on_vote(
     match_id, choice = parsed
     user = callback.from_user
 
+    # 1) Запись голоса. Только её сбой считается реальной ошибкой.
     try:
         async with sessionmaker() as session:
             match = await repo.get_match(session, match_id)
@@ -67,11 +68,7 @@ async def on_vote(
             )
             await repo.upsert_prediction(session, match_id, user.id, choice)
             await session.commit()
-
             label = presentation.choice_label(match, choice)
-            await matches_service.refresh_vote_message_counts(
-                bot, session, settings, match
-            )
     except Exception as exc:  # noqa: BLE001
         logger.exception("Ошибка записи прогноза user=%s match=%s", user.id, match_id)
         await callback.answer(
@@ -86,7 +83,20 @@ async def on_vote(
         )
         return
 
+    # Голос сохранён — подтверждаем участнику сразу.
     await callback.answer(f"✅ Голос отправлен и сохранён.\n{_plain(label)}")
+
+    # 2) Обновление счётчика — необязательная «косметика». Любой сбой (в т.ч.
+    # flood control) глушим: голос уже записан, повторно беспокоить незачем.
+    try:
+        async with sessionmaker() as session:
+            match = await repo.get_match(session, match_id)
+            if match is not None:
+                await matches_service.refresh_vote_message_counts(
+                    bot, session, settings, match
+                )
+    except Exception:  # noqa: BLE001
+        logger.debug("Счётчик матча %s не обновлён (не критично)", match_id)
 
 
 def _plain(html_label: str) -> str:
